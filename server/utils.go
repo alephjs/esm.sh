@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"encoding/base64"
 	"errors"
 	"net/http"
 	"os"
@@ -124,7 +123,7 @@ func findFiles(root string, dir string, filter func(filename string) bool) ([]st
 		name := entry.Name()
 		filename := name
 		if dir != "" {
-			filename = dir + "/" + name
+			filename = join2(dir, '/', name)
 		}
 		if entry.IsDir() {
 			if name == "node_modules" {
@@ -147,18 +146,20 @@ func findFiles(root string, dir string, filter func(filename string) bool) ([]st
 	return files, nil
 }
 
-// btoaUrl converts a string to a base64 string.
-func btoaUrl(s string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(s))
+func join2(a string, c byte, b string) string {
+	buf := make([]byte, len(a)+1+len(b))
+	copy(buf, a)
+	buf[len(a)] = c
+	copy(buf[len(a)+1:], b)
+	return string(buf)
 }
 
-// atobUrl converts a base64 string to a string.
-func atobUrl(s string) (string, error) {
-	data, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+func join3(a string, b string, c string) string {
+	buf := make([]byte, len(a)+len(b)+len(c))
+	copy(buf, a)
+	copy(buf[len(a):], b)
+	copy(buf[len(b):], c)
+	return string(buf)
 }
 
 // appendVaryHeader appends the given key to the `Vary` header.
@@ -167,7 +168,7 @@ func appendVaryHeader(header http.Header, key string) {
 	if vary == "" {
 		header.Set("Vary", key)
 	} else {
-		header.Set("Vary", vary+", "+key)
+		header.Set("Vary", join3(vary, ", ", key))
 	}
 }
 

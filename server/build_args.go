@@ -1,7 +1,10 @@
 package server
 
 import (
-	"fmt"
+	"bytes"
+	"encoding/base64"
+	"encoding/binary"
+	"errors"
 	"path"
 	"sort"
 	"strings"
@@ -11,6 +14,7 @@ import (
 )
 
 type BuildArgs struct {
+	at                uint32
 	alias             map[string]string
 	deps              map[string]string
 	external          set.ReadOnlySet[string]
@@ -21,13 +25,18 @@ type BuildArgs struct {
 }
 
 func decodeBuildArgs(argsString string) (args BuildArgs, err error) {
-	s, err := atobUrl(argsString)
+	data, err := base64.RawURLEncoding.DecodeString(argsString)
 	if err == nil {
 		args = BuildArgs{}
-		for _, p := range strings.Split(s, "\n") {
-			if strings.HasPrefix(p, "a") {
+		for _, p := range bytes.Split(data, []byte{'\n'}) {
+			if len(p) == 0 {
+				continue
+			}
+			if p[0] == '@' {
+				args.at = binary.BigEndian.Uint32(p[1:])
+			} else if p[0] == 'a' {
 				args.alias = map[string]string{}
-				for _, p := range strings.Split(p[1:], ",") {
+				for _, p := range strings.Split(string(p[1:]), ",") {
 					name, to := utils.SplitByFirstByte(p, ':')
 					name = strings.TrimSpace(name)
 					to = strings.TrimSpace(to)
@@ -35,26 +44,29 @@ func decodeBuildArgs(argsString string) (args BuildArgs, err error) {
 						args.alias[name] = to
 					}
 				}
-			} else if strings.HasPrefix(p, "d") {
+			} else if p[0] == 'd' {
 				deps := map[string]string{}
-				for _, p := range strings.Split(p[1:], ",") {
+				for _, p := range strings.Split(string(p[1:]), ",") {
 					pkgName, pkgVersion, _, _ := splitEsmPath(p)
 					deps[pkgName] = pkgVersion
 				}
 				args.deps = deps
-			} else if strings.HasPrefix(p, "e") {
-				args.external = *set.NewReadOnly[string](strings.Split(p[1:], ",")...)
-			} else if strings.HasPrefix(p, "c") {
-				args.conditions = append(args.conditions, strings.Split(p[1:], ",")...)
+			} else if p[0] == 'e' {
+				args.external = *set.NewReadOnly[string](strings.Split(string(p[1:]), ",")...)
+			} else if p[0] == 'c' {
+				args.conditions = strings.Split(string(p[1:]), ",")
 			} else {
-				switch p {
-				case "r":
+				if len(p) != 1 {
+					err = errors.New("invalid build args")
+					return
+				}
+				switch p[0] {
+				case 'r':
 					args.externalRequire = true
-				case "k":
+				case 'k':
 					args.keepNames = true
-				case "i":
+				case 'i':
 					args.ignoreAnnotations = true
-
 				}
 			}
 		}
@@ -63,60 +75,65 @@ func decodeBuildArgs(argsString string) (args BuildArgs, err error) {
 }
 
 func encodeBuildArgs(args BuildArgs, isDts bool) string {
-	lines := []string{}
-	if len(args.alias) > 0 {
-		var ss sort.StringSlice
+	var buf bytes.Buffer
+	if args.at > 0 {
+		p := make([]byte, 4)
+		binary.BigEndian.PutUint32(p, args.at)
+		buf.WriteByte('@')
+		buf.Write(p)
+		buf.WriteByte('\n')
+	}
+	if l := len(args.alias); l > 0 {
+		alias := make(sort.StringSlice, 0, l)
 		for from, to := range args.alias {
-			ss = append(ss, fmt.Sprintf("%s:%s", from, to))
+			alias = append(alias, join2(from, ':', to))
 		}
-		if len(ss) > 0 {
-			ss.Sort()
-			lines = append(lines, fmt.Sprintf("a%s", strings.Join(ss, ",")))
-		}
+		alias.Sort()
+		buf.WriteByte('a')
+		buf.WriteString(strings.Join(alias, ","))
+		buf.WriteByte('\n')
 	}
-	if len(args.deps) > 0 {
-		var ss sort.StringSlice
+	if l := len(args.deps); l > 0 {
+		deps := make(sort.StringSlice, 0, l)
 		for name, version := range args.deps {
-			ss = append(ss, fmt.Sprintf("%s@%s", name, version))
+			deps = append(deps, join2(name, '@', version))
 		}
-		if len(ss) > 0 {
-			ss.Sort()
-			lines = append(lines, fmt.Sprintf("d%s", strings.Join(ss, ",")))
-		}
+		deps.Sort()
+		buf.WriteByte('d')
+		buf.WriteString(strings.Join(deps, ","))
+		buf.WriteByte('\n')
 	}
-	if args.external.Len() > 0 {
-		var ss sort.StringSlice
+	if l := args.external.Len(); l > 0 {
+		external := make(sort.StringSlice, 0, l)
 		for _, name := range args.external.Values() {
-			ss = append(ss, name)
+			external = append(external, name)
 		}
-		if len(ss) > 0 {
-			ss.Sort()
-			lines = append(lines, fmt.Sprintf("e%s", strings.Join(ss, ",")))
-		}
+		external.Sort()
+		buf.WriteByte('e')
+		buf.WriteString(strings.Join(external, ","))
+		buf.WriteByte('\n')
 	}
-	if len(args.conditions) > 0 {
-		var ss sort.StringSlice
-		for _, name := range args.conditions {
-			ss = append(ss, name)
-		}
-		if len(ss) > 0 {
-			ss.Sort()
-			lines = append(lines, fmt.Sprintf("c%s", strings.Join(ss, ",")))
-		}
+	if l := len(args.conditions); l > 0 {
+		condiitons := make(sort.StringSlice, l)
+		copy(condiitons, args.conditions)
+		condiitons.Sort()
+		buf.WriteByte('c')
+		buf.WriteString(strings.Join(condiitons, ","))
+		buf.WriteByte('\n')
 	}
 	if !isDts {
 		if args.externalRequire {
-			lines = append(lines, "r")
+			buf.Write([]byte{'r', '\n'})
 		}
 		if args.keepNames {
-			lines = append(lines, "k")
+			buf.Write([]byte{'k', '\n'})
 		}
 		if args.ignoreAnnotations {
-			lines = append(lines, "i")
+			buf.Write([]byte{'i', '\n'})
 		}
 	}
-	if len(lines) > 0 {
-		return btoaUrl(strings.Join(lines, "\n"))
+	if l := buf.Len(); l > 1 {
+		return base64.RawURLEncoding.EncodeToString(buf.Bytes()[0 : l-1])
 	}
 	return ""
 }

@@ -563,11 +563,11 @@ func esmRouter(db DB, buildStorage storage.Storage, logger *log.Logger) rex.Hand
 				if ctxParam == "" {
 					return rex.Status(400, "Missing `ctx` Param")
 				}
-				ctxPath, err := atobUrl(ctxParam)
+				ctxPath, err := base64.RawURLEncoding.DecodeString(ctxParam)
 				if err != nil {
 					return rex.Status(400, "Invalid `ctx` Param")
 				}
-				ctxUrlRaw := modUrl.Scheme + "://" + modUrl.Host + ctxPath
+				ctxUrlRaw := modUrl.Scheme + "://" + modUrl.Host + string(ctxPath)
 				ctxUrl, err := url.Parse(ctxUrlRaw)
 				if err != nil {
 					return rex.Status(400, "Invalid `ctx` Param")
@@ -721,11 +721,11 @@ func esmRouter(db DB, buildStorage storage.Storage, logger *log.Logger) rex.Hand
 				if err == storage.ErrNotFound {
 					importMap := common.ImportMap{}
 					if len(im) > 0 {
-						imPath, err := atobUrl(im)
+						imPath, err := base64.RawURLEncoding.DecodeString(im)
 						if err != nil {
 							return rex.Status(400, "Invalid `im` Param")
 						}
-						imUrl, err := url.Parse(modUrl.Scheme + "://" + modUrl.Host + imPath)
+						imUrl, err := url.Parse(modUrl.Scheme + "://" + modUrl.Host + string(imPath))
 						if err != nil {
 							return rex.Status(400, "Invalid `im` Param")
 						}
@@ -764,7 +764,8 @@ func esmRouter(db DB, buildStorage storage.Storage, logger *log.Logger) rex.Hand
 										if err != nil {
 											return rex.Status(400, "Invalid import map")
 										}
-										importMap.Src, _ = atobUrl(im)
+										data, _ := base64.RawURLEncoding.DecodeString(im)
+										importMap.Src = string(data)
 									}
 									break
 								}
@@ -1416,7 +1417,7 @@ func esmRouter(db DB, buildStorage storage.Storage, logger *log.Logger) rex.Hand
 		}
 
 		// match path `PKG@VERSION/X-${args}/esnext/SUBPATH`
-		xArgs := false
+		isPathWithArgsSegment := false
 		if pathKind == EsmBuild || pathKind == EsmDts {
 			a := strings.Split(esm.SubModuleName, "/")
 			if len(a) > 1 && strings.HasPrefix(a[0], "X-") {
@@ -1427,12 +1428,16 @@ func esmRouter(db DB, buildStorage storage.Storage, logger *log.Logger) rex.Hand
 				esm.SubPath = strings.Join(strings.Split(esm.SubPath, "/")[1:], "/")
 				esm.SubModuleName = stripEntryModuleExt(esm.SubPath)
 				buildArgs = args
-				xArgs = true
+				isPathWithArgsSegment = true
 			}
 		}
 
 		// resolve `alias`, `deps`, `external` of the build args
-		if !xArgs {
+		if !isPathWithArgsSegment {
+			at := query.Get("at")
+			if at != "" {
+				// todo: parse the `at` query
+			}
 			err := resolveBuildArgs(npmrc, path.Join(npmrc.StoreDir(), esm.Name()), &buildArgs, esm)
 			if err != nil {
 				return rex.Status(500, err.Error())
@@ -1500,7 +1505,7 @@ func esmRouter(db DB, buildStorage storage.Storage, logger *log.Logger) rex.Hand
 			return bytes.ReplaceAll(buffer, []byte("{ESM_CDN_ORIGIN}"), []byte(origin))
 		}
 
-		if !xArgs {
+		if !isPathWithArgsSegment {
 			externalRequire := query.Has("external-require")
 			// workaround: force "unocss/preset-icons" to external `require` calls
 			if !externalRequire && esm.PkgName == "@unocss/preset-icons" {

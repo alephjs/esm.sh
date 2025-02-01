@@ -43,7 +43,7 @@ With [import maps](https://github.com/WICG/import-maps), you can even use bare i
   ```js
   // Examples
   import React from "https://esm.sh/react"; // latest
-  import React from "https://esm.sh/react@17"; // 17.0.2
+  import React from "https://esm.sh/react@18"; // 18.2.0
   import React from "https://esm.sh/react@beta"; // latest beta
   import { renderToString } from "https://esm.sh/react-dom/server"; // sub-modules
   ```
@@ -66,14 +66,31 @@ With [import maps](https://github.com/WICG/import-maps), you can even use bare i
   import { Bench } from "https://esm.sh/pr/tinybench@a832a55"; // --compact
   ```
 
-### Specifying Dependencies
+### Package Versioning
 
-By default, esm.sh rewrites import specifiers based on the package dependencies. To specify the version of these
-dependencies, you can add `?deps=PACKAGE@VERSION` to the import URL. To specify multiple dependencies, separate them with commas, like this: `?deps=react@17.0.2,react-dom@17.0.2`.
+esm.sh respects [semver](https://docs.npmjs.com/cli/v6/using-npm/semver) and [dist-tag](https://docs.npmjs.com/cli/v8/commands/npm-dist-tag) of NPM for resolving package versions. This means you can specify versions using semver ranges or dist-tags like `latest`, `beta`, etc.
 
 ```js
-import React from "https://esm.sh/react@17.0.2";
-import useSWR from "https://esm.sh/swr?deps=react@17.0.2";
+import React from "https://esm.sh/react" // latest
+import React from "https://esm.sh/react@19.0.0"
+import React from "https://esm.sh/react@^19.0.0"
+import React from "https://esm.sh/react@19"
+import React from "https://esm.sh/react@canary"
+```
+
+You can also fetch a package version closest to a given timestamp or date. This feature eliminates the need to know the exact version beforehand, similar to running `npm install <package>` without specifying a version. However, it still provides a fixed version for future installations, ensuring consistency. This is particularly useful for LLM-generated web applications, where maintaining the same package version across all instances is crucial.
+
+```js
+import React from "https://esm.sh/react?at=YYYY-MM-DD";
+import React from "https://esm.sh/react?at=TIMESTAMP";
+```
+
+By default, esm.sh rewrites import specifiers based on the `dependencies` field of `package.json`. To specify the version of these
+dependencies, you can add `?deps=PACKAGE@VERSION` to the import URL. To specify multiple dependencies, separate them with commas(`,`), like this: `?deps=react@19.0.0,react-dom@19.0.0`.
+
+```js
+import React from "https://esm.sh/react@19.0.0";
+import useSWR from "https://esm.sh/swr?deps=react@19.0.0";
 ```
 
 ### Aliasing Dependencies
