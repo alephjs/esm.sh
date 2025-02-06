@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/base64"
 	"flag"
 	"os"
 	"strings"
@@ -63,20 +62,6 @@ func endsWith(s string, suffixs ...string) bool {
 	return false
 }
 
-// btoaUrl converts a string to a base64 string.
-func btoaUrl(s string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(s))
-}
-
-// atobUrl converts a base64 string to a string.
-func atobUrl(s string) (string, error) {
-	data, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
 // parseCommandFlag parses the command flag.
 func parseCommandFlag() (string, []string) {
 	flag.CommandLine.Parse(os.Args[2:])
@@ -100,8 +85,8 @@ func parseCommandFlag() (string, []string) {
 	return args[0], args[1:]
 }
 
-// stringInSlice returns true if the given value is included in the array.
-func stringInSlice(arr []string, value string) bool {
+// includes returns true if the given value is included in the array.
+func includes(arr []string, value string) bool {
 	for _, v := range arr {
 		if v == value {
 			return true

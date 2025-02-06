@@ -7,7 +7,7 @@ require (
 	github.com/evanw/esbuild v0.24.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/ije/esbuild-internal v0.24.2
-	github.com/ije/gox v0.9.7
+	github.com/ije/gox v0.9.8
 	github.com/ije/rex v1.14.7
 	github.com/mssola/useragent v1.0.0
 	github.com/yuin/goldmark v1.7.8

@@ -31,8 +31,8 @@ var langVariants = []string{
 	"TypeScript",
 }
 
-// Create a new esm.sh web app
-func Init(efs *embed.FS) {
+// Create a new no-build web app with esm.sh CDN.
+func Init(fs *embed.FS) {
 	framework := flag.String("framework", "", "javascript framework")
 	cssFramework := flag.String("css-framework", "", "CSS framework")
 	lang := flag.String("lang", "", "language")
@@ -45,20 +45,20 @@ func Init(efs *embed.FS) {
 
 	if *framework == "" {
 		*framework = term.Select(raw, "Select a framework:", frameworks)
-	} else if !stringInSlice(frameworks, *framework) {
+	} else if !includes(frameworks, *framework) {
 		fmt.Println("Invalid framework: ", *framework)
 		os.Exit(1)
 	}
 
 	if *cssFramework == "" {
 		*cssFramework = term.Select(raw, "Select a CSS framework:", cssFrameworks)
-	} else if !stringInSlice(cssFrameworks, *cssFramework) {
+	} else if !includes(cssFrameworks, *cssFramework) {
 		*cssFramework = cssFrameworks[0]
 	}
 
 	if *lang == "" {
 		*lang = term.Select(raw, "Select a variant:", langVariants)
-	} else if !stringInSlice(langVariants, *lang) {
+	} else if !includes(langVariants, *lang) {
 		*lang = langVariants[0]
 	}
 
@@ -70,16 +70,16 @@ func Init(efs *embed.FS) {
 		}
 	}
 
-	dir := "demo/" + strings.ToLower(*framework)
+	dir := "cli/demo/" + strings.ToLower(*framework)
 	if *cssFramework == "UnoCSS" {
-		dir = "demo/with-unocss/" + strings.ToLower(*framework)
+		dir = "cli/demo/with-unocss/" + strings.ToLower(*framework)
 	}
-	err = walkEFS(efs, dir, func(filename string) error {
+	err = walkEmbedFS(fs, dir, func(filename string) error {
 		savePath := projectName + strings.TrimPrefix(filename, dir)
 		os.MkdirAll(filepath.Dir(savePath), 0755)
 		if *lang == "JavaScript" {
 			if (strings.HasSuffix(savePath, ".ts") || strings.HasSuffix(savePath, ".tsx")) && !strings.HasSuffix(savePath, ".d.ts") {
-				data, err := efs.ReadFile(filename)
+				data, err := fs.ReadFile(filename)
 				if err != nil {
 					return err
 				}
@@ -93,7 +93,7 @@ func Init(efs *embed.FS) {
 				data = bytes.ReplaceAll(data, []byte(".tsx\""), []byte(".jsx\""))
 				return os.WriteFile(savePath, data, 0644)
 			} else if strings.HasSuffix(savePath, ".html") {
-				data, err := efs.ReadFile(filename)
+				data, err := fs.ReadFile(filename)
 				if err != nil {
 					return err
 				}
@@ -101,7 +101,7 @@ func Init(efs *embed.FS) {
 				data = bytes.ReplaceAll(data, []byte(".tsx\""), []byte(".jsx\""))
 				return os.WriteFile(savePath, data, 0644)
 			} else if strings.HasSuffix(savePath, ".vue") || strings.HasSuffix(savePath, ".svelte") {
-				data, err := efs.ReadFile(filename)
+				data, err := fs.ReadFile(filename)
 				if err != nil {
 					return err
 				}
@@ -109,7 +109,7 @@ func Init(efs *embed.FS) {
 				return os.WriteFile(savePath, data, 0644)
 			}
 		}
-		f, err := efs.Open(filename)
+		f, err := fs.Open(filename)
 		if err != nil {
 			return err
 		}
@@ -129,20 +129,26 @@ func Init(efs *embed.FS) {
 
 	fmt.Println(" ")
 	fmt.Println(term.Dim("Project created successfully."))
-	fmt.Println(term.Dim("To start the development server:"))
+	fmt.Println(term.Dim("We highly recommend installing our VS Code extension for a better DX: https://link.esm.sh/vsce"))
+	fmt.Println(term.Dim("To start the app in development mode, run:"))
 	fmt.Println(" ")
-	fmt.Println(term.Dim("$ ") + "cd " + projectName + " && esm.sh run")
+	fmt.Print(term.Dim("$ ") + "cd " + projectName)
+	if strings.Contains(os.Args[0], "/node_modules/") {
+		fmt.Println(" && npx esm.sh serve")
+	} else {
+		fmt.Println(" && esm.sh serve")
+	}
 	fmt.Println(" ")
 }
 
-func walkEFS(efs *embed.FS, dir string, cb func(filename string) error) error {
-	entries, err := efs.ReadDir(dir)
+func walkEmbedFS(fs *embed.FS, dir string, cb func(filename string) error) error {
+	entries, err := fs.ReadDir(dir)
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
-			err = walkEFS(efs, dir+"/"+entry.Name(), cb)
+			err = walkEmbedFS(fs, dir+"/"+entry.Name(), cb)
 			if err != nil {
 				return err
 			}

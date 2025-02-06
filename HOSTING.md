@@ -30,7 +30,7 @@ You can find all the server options in [config.example.jsonc](./config.example.j
 You will need [Go](https://golang.org/dl) 1.22+ to compile and run the server.
 
 ```bash
-go run main.go --config=config.json
+go run server/cmd/main.go --config=config.json
 ```
 
 Then you can import `React` from <http://localhost:8080/react>.
@@ -48,7 +48,7 @@ You can deploy the server to a single machine with the [deploy.sh](./scripts/dep
 
 Recommended hosting requirements:
 
-- Linux system (Debian/Ubuntu)
+- Linux system (with systemd)
 - 4x CPU cores or more
 - 8GB RAM or more
 - 100GB disk space or more

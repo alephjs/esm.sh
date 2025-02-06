@@ -49,7 +49,7 @@ Deno.test("transform", async (t) => {
   });
 
   const modUrl = new URL(import.meta.url);
-  const demoRootDir = join(modUrl.pathname, "../../../cli/cmd/demo");
+  const demoRootDir = join(modUrl.pathname, "../../../cli/demo");
   const ac = new AbortController();
 
   Deno.serve({

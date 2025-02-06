@@ -11,17 +11,9 @@ import (
 	"path"
 	"runtime"
 	"strings"
-	"sync"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
 	"github.com/ije/gox/term"
-	"github.com/ije/gox/utils"
-)
-
-var (
-	loaderRuntime        = "deno"
-	loaderRuntimeVersion = "2.1.4"
-	compileSyncMap       = sync.Map{}
 )
 
 type LoaderOutput struct {
@@ -36,7 +28,7 @@ func runLoader(loaderJsPath string, filename string, code string) (output *Loade
 	stderr, recycle := NewBuffer()
 	defer recycle()
 	cmd := exec.Command(
-		path.Join(config.WorkDir, "bin", loaderRuntime), "run",
+		path.Join(config.WorkDir, "bin", "deno"), "run",
 		"--no-config",
 		"--no-lock",
 		"--cached-only",
@@ -107,40 +99,40 @@ func buildLoader(wd, loaderJs, outfile string) (err error) {
 	return
 }
 
-func installLoaderRuntime() (err error) {
+func installDeno(version string) (installedVersion string, err error) {
 	binDir := path.Join(config.WorkDir, "bin")
 	err = ensureDir(binDir)
 	if err != nil {
-		return err
+		return
 	}
 
 	// check local installed deno
-	installedRuntime, err := exec.LookPath(loaderRuntime)
+	installedDeno, err := exec.LookPath("deno")
 	if err == nil {
-		output, err := run(installedRuntime, "eval", "console.log(Deno.version.deno)")
+		output, err := run(installedDeno, "eval", "console.log(Deno.version.deno)")
 		if err == nil {
-			version := strings.TrimSpace(string(output))
-			if !semverLessThan(version, "1.45") {
-				_, err = utils.CopyFile(installedRuntime, path.Join(binDir, loaderRuntime))
-				if err == nil {
-					loaderRuntimeVersion = version
+			v := strings.TrimSpace(string(output))
+			if !semverLessThan(v, "1.45") {
+				err = os.Symlink(installedDeno, path.Join(binDir, "deno"))
+				if err != nil && !os.IsExist(err) {
+					return "", err
 				}
-				return err
+				return v, nil
 			}
 		}
 	}
 
-	if existsFile(path.Join(binDir, loaderRuntime)) {
-		output, err := run(path.Join(binDir, loaderRuntime), "eval", "console.log(Deno.version.deno)")
+	if existsFile(path.Join(binDir, "deno")) {
+		output, err := run(path.Join(binDir, "deno"), "eval", "console.log(Deno.version.deno)")
 		if err == nil {
 			version := strings.TrimSpace(string(output))
-			if !semverLessThan(version, loaderRuntimeVersion) {
-				return nil
+			if !semverLessThan(version, version) {
+				return version, nil
 			}
 		}
 	}
 
-	url, err := getLoaderRuntimeInstallURL()
+	url, err := getDenoInstallURL(version)
 	if err != nil {
 		return
 	}
@@ -156,10 +148,10 @@ func installLoaderRuntime() (err error) {
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return fmt.Errorf("failed to download %s: %s", loaderRuntime, res.Status)
+		return "", fmt.Errorf("failed to download Deno install package: %s", res.Status)
 	}
 
-	tmpFile := path.Join(binDir, loaderRuntime+".zip")
+	tmpFile := path.Join(binDir, "deno.zip")
 	defer os.Remove(tmpFile)
 
 	f, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY, 0644)
@@ -180,31 +172,31 @@ func installLoaderRuntime() (err error) {
 	defer zr.Close()
 
 	for _, zf := range zr.File {
-		if zf.Name == loaderRuntime {
+		if zf.Name == "deno" {
 			r, err := zf.Open()
 			if err != nil {
-				return err
+				return "", err
 			}
 			defer r.Close()
 
-			f, err := os.OpenFile(path.Join(binDir, loaderRuntime), os.O_CREATE|os.O_WRONLY, 0755)
+			f, err := os.OpenFile(path.Join(binDir, "deno"), os.O_CREATE|os.O_WRONLY, 0755)
 			if err != nil {
-				return err
+				return "", err
 			}
 			defer f.Close()
 
 			_, err = io.Copy(f, r)
 			if err != nil {
-				return err
+				return "", err
 			}
 			break
 		}
 	}
 
-	return
+	return version, nil
 }
 
-func getLoaderRuntimeInstallURL() (string, error) {
+func getDenoInstallURL(version string) (string, error) {
 	var arch string
 	var os string
 
@@ -228,5 +220,5 @@ func getLoaderRuntimeInstallURL() (string, error) {
 		return "", errors.New("unsupported os: " + runtime.GOOS)
 	}
 
-	return fmt.Sprintf("https://github.com/denoland/deno/releases/download/v%s/%s-%s-%s.zip", loaderRuntimeVersion, loaderRuntime, arch, os), nil
+	return fmt.Sprintf("https://github.com/denoland/deno/releases/download/v%s/deno-%s-%s.zip", version, arch, os), nil
 }

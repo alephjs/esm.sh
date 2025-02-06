@@ -12,8 +12,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/ije/esbuild-internal v0.24.2 h1:i1sjIu6suFZ1Arc4w0gWNE8OLLiAhEQ3nhU987uB+5w=
 github.com/ije/esbuild-internal v0.24.2/go.mod h1:s7HvKZ4ZGifyzvgWpSwnJOQTr6b+bsgfNBZ8HAEwwSM=
-github.com/ije/gox v0.9.7 h1:KfEiWOvk/ZqhJnTxJCWMB8mkBLi3HYhGJrrxQyua204=
-github.com/ije/gox v0.9.7/go.mod h1:3GTaK8WXf6oxRbrViLqKNLTNcMR871Dz0zoujFNmG48=
+github.com/ije/gox v0.9.8 h1:vlkCIy8NxmZAVfZ6eah0/H/RNqMKHXC9FS5kiYdAwbE=
+github.com/ije/gox v0.9.8/go.mod h1:3GTaK8WXf6oxRbrViLqKNLTNcMR871Dz0zoujFNmG48=
 github.com/ije/rex v1.14.7 h1:j/aS56uE1U6KJVIBk44qAWfWBwxe26aOK2yHUXLgL0k=
 github.com/ije/rex v1.14.7/go.mod h1:Gvl2st1enT+SilH1q2enM8o37evm0IN/cx9F+B0z7jU=
 github.com/mssola/useragent v1.0.0 h1:WRlDpXyxHDNfvZaPEut5Biveq86Ze4o4EMffyMxmH5o=

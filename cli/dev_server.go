@@ -3,13 +3,12 @@ package cli
 import (
 	"bytes"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,48 +27,14 @@ import (
 	"golang.org/x/net/html"
 )
 
-func Serve(efs *embed.FS) (err error) {
-	port := flag.Int("port", 3000, "port to serve on")
-	rootDir, _ := parseCommandFlag()
-
-	if rootDir == "" {
-		rootDir, err = os.Getwd()
-	} else {
-		rootDir, err = filepath.Abs(rootDir)
-		if err == nil {
-			var fi os.FileInfo
-			fi, err = os.Stat(rootDir)
-			if err == nil && !fi.IsDir() {
-				err = fmt.Errorf("stat %s: not a directory", rootDir)
-			}
-		}
-	}
-	if err != nil {
-		os.Stderr.WriteString(term.Red(err.Error()))
-		return err
-	}
-
-	serv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", *port),
-		Handler: &DevServer{efs: efs, rootDir: rootDir},
-	}
-	ln, err := net.Listen("tcp", serv.Addr)
-	if err != nil {
-		os.Stderr.WriteString(term.Red(err.Error()))
-		return err
-	}
-	fmt.Printf(term.Green("Server is ready on http://localhost:%d\n"), *port)
-	return serv.Serve(ln)
-}
-
 type DevServer struct {
-	efs       *embed.FS
-	loader    *LoaderWorker
-	rootDir   string
-	watchData map[*websocket.Conn]map[string]int64
-	rwlock    sync.RWMutex
-	lock      sync.RWMutex
-	loadCache sync.Map
+	fs               *embed.FS
+	rootDir          string
+	watchData        map[*websocket.Conn]map[string]int64
+	watchDataMapLock sync.RWMutex
+	loaderWorker     *LoaderWorker
+	loaderInitLock   sync.Mutex
+	loaderCache      sync.Map
 }
 
 func (d *DevServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +243,7 @@ func (d *DevServer) ServeHtml(w http.ResponseWriter, r *http.Request, pathname s
 						hrefAttr, _ = utils.SplitByFirstByte(hrefAttr, '?')
 						if hrefAttr == "uno.css" || strings.HasSuffix(hrefAttr, "/uno.css") {
 							w.Write([]byte("<link rel=\"stylesheet\" href=\""))
-							w.Write([]byte(hrefAttr + "?ctx=" + btoaUrl(pathname)))
+							w.Write([]byte(hrefAttr + "?ctx=" + base64.RawURLEncoding.EncodeToString([]byte(pathname))))
 							w.Write([]byte{'"', '>'})
 							overriding = "script"
 						} else {
@@ -290,7 +255,7 @@ func (d *DevServer) ServeHtml(w http.ResponseWriter, r *http.Request, pathname s
 								case "src":
 									hrefAttr, _ = utils.SplitByFirstByte(hrefAttr, '?')
 									w.Write([]byte(" src=\""))
-									w.Write([]byte(hrefAttr + "?im=" + btoaUrl(pathname)))
+									w.Write([]byte(hrefAttr + "?im=" + base64.RawURLEncoding.EncodeToString([]byte(pathname))))
 									w.Write([]byte{'"'})
 								default:
 									w.Write([]byte{' '})
@@ -350,12 +315,12 @@ func (d *DevServer) ServeHtml(w http.ResponseWriter, r *http.Request, pathname s
 
 func (d *DevServer) ServeModule(w http.ResponseWriter, r *http.Request, pathname string, sourceCode []byte) {
 	query := r.URL.Query()
-	im, err := atobUrl(query.Get("im"))
+	im, err := base64.RawURLEncoding.DecodeString(query.Get("im"))
 	if err != nil {
 		http.Error(w, "Bad Request", 400)
 		return
 	}
-	imHtmlFilename := filepath.Join(d.rootDir, im)
+	imHtmlFilename := filepath.Join(d.rootDir, string(im))
 	imHtmlFile, err := os.Open(imHtmlFilename)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -394,7 +359,7 @@ func (d *DevServer) ServeModule(w http.ResponseWriter, r *http.Request, pathname
 						w.Write([]byte(`throw new Error("Failed to parse import map: invalid JSON")`))
 						return
 					}
-					importMap.Src = "file://" + im
+					importMap.Src = "file://" + string(im)
 					break
 				}
 			} else if string(tagName) == "body" {
@@ -439,8 +404,8 @@ func (d *DevServer) ServeModule(w http.ResponseWriter, r *http.Request, pathname
 	}
 	cacheKey := fmt.Sprintf("module-%s", pathname)
 	etagCacheKey := fmt.Sprintf("module-%s.etag", pathname)
-	if js, ok := d.loadCache.Load(cacheKey); ok {
-		if e, ok := d.loadCache.Load(etagCacheKey); ok {
+	if js, ok := d.loaderCache.Load(cacheKey); ok {
+		if e, ok := d.loaderCache.Load(etagCacheKey); ok {
 			if e.(string) == etag {
 				header := w.Header()
 				header.Set("Content-Type", "application/javascript; charset=utf-8")
@@ -469,8 +434,8 @@ func (d *DevServer) ServeModule(w http.ResponseWriter, r *http.Request, pathname
 		http.Error(w, "Internal Server Error", 500)
 		return
 	}
-	d.loadCache.Store(cacheKey, []byte(js))
-	d.loadCache.Store(etagCacheKey, etag)
+	d.loaderCache.Store(cacheKey, []byte(js))
+	d.loaderCache.Store(etagCacheKey, etag)
 	header := w.Header()
 	header.Set("Content-Type", "application/javascript; charset=utf-8")
 	if !query.Has("t") {
@@ -519,12 +484,12 @@ func (d *DevServer) ServeCSSModule(w http.ResponseWriter, r *http.Request, pathn
 
 func (d *DevServer) ServeUnoCSS(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	ctx, err := atobUrl(query.Get("ctx"))
+	ctx, err := base64.RawURLEncoding.DecodeString(query.Get("ctx"))
 	if err != nil {
 		http.Error(w, "Bad Request", 400)
 		return
 	}
-	imHtmlFilename := filepath.Join(d.rootDir, ctx)
+	imHtmlFilename := filepath.Join(d.rootDir, string(ctx))
 	imHtmlFile, err := os.Open(imHtmlFilename)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -571,7 +536,7 @@ func (d *DevServer) ServeUnoCSS(w http.ResponseWriter, r *http.Request) {
 					if len(innerText) > 0 {
 						err := json.Unmarshal(innerText, &importMap)
 						if err == nil {
-							importMap.Src = ctx
+							importMap.Src = string(ctx)
 						}
 					}
 				} else if srcAttr == "" {
@@ -632,8 +597,8 @@ func (d *DevServer) ServeUnoCSS(w http.ResponseWriter, r *http.Request) {
 	}
 	cacheKey := fmt.Sprintf("unocss-%s", ctx)
 	etagCacheKey := fmt.Sprintf("unocss-%s.etag", ctx)
-	if css, ok := d.loadCache.Load(cacheKey); ok {
-		if e, ok := d.loadCache.Load(etagCacheKey); ok {
+	if css, ok := d.loaderCache.Load(cacheKey); ok {
+		if e, ok := d.loaderCache.Load(etagCacheKey); ok {
 			if e.(string) == etag {
 				header := w.Header()
 				header.Set("Content-Type", "text/css; charset=utf-8")
@@ -659,8 +624,8 @@ func (d *DevServer) ServeUnoCSS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", 500)
 		return
 	}
-	d.loadCache.Store(cacheKey, []byte(css))
-	d.loadCache.Store(etagCacheKey, etag)
+	d.loaderCache.Store(cacheKey, []byte(css))
+	d.loaderCache.Store(etagCacheKey, etag)
 	header := w.Header()
 	header.Set("Content-Type", "text/css; charset=utf-8")
 	if !query.Has("t") {
@@ -671,7 +636,7 @@ func (d *DevServer) ServeUnoCSS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *DevServer) ServeInternalJS(w http.ResponseWriter, r *http.Request, name string) {
-	data, err := d.efs.ReadFile("internal/" + name + ".js")
+	data, err := d.fs.ReadFile("cli/internal/" + name + ".js")
 	if err != nil {
 		http.Error(w, "Internal Server Error", 500)
 		return
@@ -704,13 +669,13 @@ func (d *DevServer) ServeHmrWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	watchList := make(map[string]int64)
-	d.rwlock.Lock()
+	d.watchDataMapLock.Lock()
 	d.watchData[conn] = watchList
-	d.rwlock.Unlock()
+	d.watchDataMapLock.Unlock()
 	defer func() {
-		d.rwlock.Lock()
+		d.watchDataMapLock.Lock()
 		delete(d.watchData, conn)
-		d.rwlock.Unlock()
+		d.watchDataMapLock.Unlock()
 	}()
 	for {
 		messageType, data, err := conn.ReadMessage()
@@ -793,11 +758,11 @@ func (d *DevServer) analyzeDependencyTree(entry string, importMap common.ImportM
 							cacheKey := fmt.Sprintf("preload-%s", pathname)
 							etagCacheKey := fmt.Sprintf("preload-%s.etag", pathname)
 							langCacheKey := fmt.Sprintf("preload-%s.lang", pathname)
-							if js, ok := d.loadCache.Load(cacheKey); ok {
-								if e, ok := d.loadCache.Load(etagCacheKey); ok {
+							if js, ok := d.loaderCache.Load(cacheKey); ok {
+								if e, ok := d.loaderCache.Load(etagCacheKey); ok {
 									if e.(string) == etag {
 										contents = string(js.([]byte))
-										if lang, ok := d.loadCache.Load(langCacheKey); ok {
+										if lang, ok := d.loaderCache.Load(langCacheKey); ok {
 											if lang.(string) == "ts" {
 												loader = esbuild.LoaderTS
 											}
@@ -814,9 +779,9 @@ func (d *DevServer) analyzeDependencyTree(entry string, importMap common.ImportM
 							if err != nil {
 								return esbuild.OnLoadResult{}, err
 							}
-							d.loadCache.Store(cacheKey, []byte(code))
-							d.loadCache.Store(etagCacheKey, etag)
-							d.loadCache.Store(langCacheKey, lang)
+							d.loaderCache.Store(cacheKey, []byte(code))
+							d.loaderCache.Store(etagCacheKey, etag)
+							d.loaderCache.Store(langCacheKey, lang)
 							contents = code
 							if lang == "ts" {
 								loader = esbuild.LoaderTS
@@ -838,7 +803,7 @@ func (d *DevServer) analyzeDependencyTree(entry string, importMap common.ImportM
 func (d *DevServer) watchFS() {
 	for {
 		time.Sleep(100 * time.Millisecond)
-		d.rwlock.RLock()
+		d.watchDataMapLock.RLock()
 		for conn, watchList := range d.watchData {
 			for pathname, mtime := range watchList {
 				filename, _ := utils.SplitByFirstByte(pathname, '?')
@@ -847,7 +812,7 @@ func (d *DevServer) watchFS() {
 					if os.IsNotExist(err) {
 						if watchList[pathname] > 0 {
 							watchList[pathname] = 0
-							d.purgeLoadCache(pathname)
+							d.purgeLoaderCache(pathname)
 							conn.WriteMessage(websocket.TextMessage, []byte("remove:"+pathname))
 						}
 					} else {
@@ -863,27 +828,27 @@ func (d *DevServer) watchFS() {
 				}
 			}
 		}
-		d.rwlock.RUnlock()
+		d.watchDataMapLock.RUnlock()
 	}
 }
 
-func (d *DevServer) purgeLoadCache(filename string) {
-	d.loadCache.Delete(fmt.Sprintf("module-%s", filename))
-	d.loadCache.Delete(fmt.Sprintf("module-%s.etag", filename))
+func (d *DevServer) purgeLoaderCache(filename string) {
+	d.loaderCache.Delete(fmt.Sprintf("module-%s", filename))
+	d.loaderCache.Delete(fmt.Sprintf("module-%s.etag", filename))
 	if strings.HasSuffix(filename, ".vue") || strings.HasSuffix(filename, ".svelte") {
-		d.loadCache.Delete(fmt.Sprintf("preload-%s", filename))
-		d.loadCache.Delete(fmt.Sprintf("preload-%s.etag", filename))
-		d.loadCache.Delete(fmt.Sprintf("preload-%s.lang", filename))
+		d.loaderCache.Delete(fmt.Sprintf("preload-%s", filename))
+		d.loaderCache.Delete(fmt.Sprintf("preload-%s.etag", filename))
+		d.loaderCache.Delete(fmt.Sprintf("preload-%s.lang", filename))
 	}
 }
 
 func (d *DevServer) getLoader() (loader *LoaderWorker, err error) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	if d.loader != nil {
-		return d.loader, nil
+	d.loaderInitLock.Lock()
+	defer d.loaderInitLock.Unlock()
+	if d.loaderWorker != nil {
+		return d.loaderWorker, nil
 	}
-	loaderJs, err := d.efs.ReadFile("internal/loader.js")
+	loaderJs, err := d.fs.ReadFile("cli/internal/loader.js")
 	if err != nil {
 		return
 	}
@@ -892,6 +857,6 @@ func (d *DevServer) getLoader() (loader *LoaderWorker, err error) {
 	if err != nil {
 		return nil, err
 	}
-	d.loader = loader
+	d.loaderWorker = loader
 	return
 }

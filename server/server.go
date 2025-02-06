@@ -87,12 +87,15 @@ func Serve() {
 	}
 	logger.Debugf("%d npm repalcements loaded", n)
 
-	// install loader runtime
-	err = installLoaderRuntime()
+	// add .esmd/bin to PATH
+	os.Setenv("PATH", fmt.Sprintf("%s%c%s", path.Join(config.WorkDir, "bin"), os.PathListSeparator, os.Getenv("PATH")))
+
+	// install deno
+	denoVersion, err := installDeno("2.1.7")
 	if err != nil {
-		logger.Fatalf("failed to install loader runtime: %v", err)
+		logger.Fatalf("failed to install deno: %v", err)
 	}
-	logger.Debugf("loader runtime(%s@%s) installed", loaderRuntime, loaderRuntimeVersion)
+	logger.Debugf("deno v%s installed", denoVersion)
 
 	// install cjs module lexer
 	err = installCommonJSModuleLexer()
@@ -100,9 +103,6 @@ func Serve() {
 		logger.Fatalf("failed to install cjs-module-lexer: %v", err)
 	}
 	logger.Debugf("cjs-module-lexer@%s installed", cjsModuleLexerVersion)
-
-	// add .esmd/bin to PATH
-	os.Setenv("PATH", fmt.Sprintf("%s%c%s", path.Join(config.WorkDir, "bin"), os.PathListSeparator, os.Getenv("PATH")))
 
 	// pre-comile uno generator in background
 	go generateUnoCSS(&NpmRC{NpmRegistry: NpmRegistry{Registry: "https://registry.npmjs.org/"}}, "", "")

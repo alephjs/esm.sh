@@ -33,29 +33,30 @@ More server options please check [config.exmaple.jsonc](./config.example.jsonc).
 ## Running the Server from Source Code
 
 ```bash
-go run -tags debug main.go
-# or
-make dev
+make dev/server
 ```
 
 Then you can import `React` from "http://localhost:8080/react"
 
-## Running Integration Tests
+## Running Server Integration Tests
 
 We use [Deno](https://deno.land) to run all the integration testing cases. Make sure you have Deno installed on your computer.
 
 ```bash
 # Run all tests
-make test
+make test/server
 
 # Run a specific test
-make test dir=react-18
+make test/server dir=react-18
 ```
 
-To add a new integration test case, copy the [test/_template](./test/_template) directory and rename it to your case name.
+To add a new integration test case, copy the [test/.template](./test/.template) directory and rename it to your case name.
 
 ```bash
-cp -r test/_template test/new_test
-nvim test/new_test/test.ts
-make dir=new_test
+# copy the testing template
+cp -r test/.template test/fix-xxx
+# edit the test code
+nvim test/fix-xxx/test.ts
+# run the test
+make test/server dir=fix-xxx
 ```
